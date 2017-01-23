@@ -1,0 +1,14 @@
+location:
+  jclouds:aws-ec2:
+    region: eu-central-1
+    minRam: 8192
+    osFamily: ubuntu
+    osVersionRegex: 12.*
+
+services:
+- type: ambari-map-reduce-tests
+  brooklyn.config:
+    ambari.security.group: test-ambari
+    ambari.data.cluster.nodes: 3
+    ambari.version: 2.2.2.0
+    ambari.stack.version: 2.4

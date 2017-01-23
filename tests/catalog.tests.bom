@@ -1,0 +1,87 @@
+brooklyn.catalog:
+  version: 0.1.0-SNAPSHOT
+
+  items:
+  - "https://raw.githubusercontent.com/brooklyncentral/common-catalog-utils/master/common-tests/src/main/resources/commontests/common.tests.bom"
+
+  - id: ambari-map-reduce-tests
+    itemType: template
+    item:
+      services:
+      - type: ambari-map-reduce-application
+        id: target-app
+        name: HDP cluster
+
+      - type: test-case
+        brooklyn.config:
+          targetId: target-app
+          targetResolutionTimeout: 10s
+          timeout: 40m
+
+        brooklyn.children:
+
+        - type: test-case
+          name: "1. HDP cluster deployed"
+          brooklyn.children:
+          - type: assert-up-and-running-initial
+            name: "1.1 Node up and running"
+          - type: assert-sensor
+            targetId: ambari-server
+            name: "HDP services deployed"
+            sensor: ambari.server.clusterState
+            assert:
+              - equals: "COMPLETED"
+
+        - type: test-http-status-200
+          targetId: ambari-server
+          name: "2. Check Ambari console available"
+          url: $brooklyn:entity("ambari-server").attributeWhenReady("main.uri")
+
+        - type: test-case
+          name: "3. Effector Tests :: resize"
+          brooklyn.children:
+            - type: invoke-effector
+              name: "3.1. Resize cluster to 3"
+              target: $brooklyn:entity("target-app").descendant("data-node-cluster")
+              effector: resize
+              params:
+                desiredSize: 3
+            - type: assert-sensor
+              name: "3.2. Size of cluster increased to 3"
+              target: $brooklyn:entity("target-app").descendant("data-node-cluster")
+              sensor: group.members.count
+              assert:
+                equals: 3
+            - type: invoke-effector
+              name: "3.3. Resize cluster to 2"
+              target: $brooklyn:entity("target-app").descendant("data-node-cluster")
+              effector: resize
+              params:
+                desiredSize: 2
+            - type: assert-sensor
+              name: "3.4. Size of cluster decreased to 2"
+              target: $brooklyn:entity("target-app").descendant("data-node-cluster")
+              sensor: group.members.count
+              assert:
+                equals: 2
+
+        - type: test-case
+          name: "4. Test node recovery"
+          brooklyn.children:
+          - type: test-ssh
+            name: "4.1. Kill node"
+            target: $brooklyn:entity("target-app").descendant("data-node-cluster").descendant("ambari-node")
+            command: |
+              nohup sudo bash -c 'sleep 10 && shutdown -h -t0 now' &
+          - type: assert-sensor
+            name: "4.2. Size of cluster incresed to 3"
+            target: $brooklyn:entity("target-app").descendant("data-node-cluster")
+            sensor: group.members.count
+            assert:
+              equals: 3
+          - type: assert-sensor
+            name: "4.3. Size of cluster decreased to 2"
+            target: $brooklyn:entity("target-app").descendant("data-node-cluster")
+            sensor: group.members.count
+            assert:
+              equals: 2

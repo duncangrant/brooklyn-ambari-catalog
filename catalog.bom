@@ -1,0 +1,138 @@
+brooklyn.catalog:
+  version: 0.1.0-SNAPSHOT
+  id: ambari-map-reduce
+  name: Ambari managed MapReduce blueprint
+
+  libraries:
+  - "https://s3-eu-west-1.amazonaws.com/duncangrtest/test/brooklyn-ambari-0.6.1-SNAPSHOT.jar"
+
+  publish:
+    description: |
+      Entities for running the Apache Ambari project in Apache Brooklyn.
+    license_code: Apache-2.0
+    icon_url: http://ambari.apache.org/1.2.5/installing-hadoop-using-ambari/common/images/ambari-logo.png
+
+  items:
+
+  - id: ambari-map-reduce-template
+    description: |
+      A cluster of Ambari nodes with mapreduce components installed
+    name: "Ambari Cluster Template"
+    iconUrl: http://ambari.apache.org/images/apache-ambari-project.jpg
+    itemType: template
+    item:
+      services:
+      - type: ambari-map-reduce-application
+        name: "Ambari driven cloud"
+
+  - id: ambari-map-reduce-application
+    itemType: entity
+    item:
+      type: org.apache.brooklyn.entity.stock.BasicApplication
+
+      brooklyn.parameters:
+      - name: ambari.data.cluster.nodes
+        description: |
+          The number of data nodes in the cluster
+        type: integer
+        default: 3
+        constraints:
+          - required
+
+      - name: ambari.security.group
+        description: |
+          A shared security group that opens port 8080 and allows full
+          traffic between nodes in the group
+        type: string
+        default: null
+
+      - name: ambari.version
+        description: |
+          The version of ambari to install
+        type: string
+        default: 2.2.2.0
+
+      - name: ambari.stack.version
+        description: |
+          The version of the hadoop stack to deploy
+          See the Ambari website for details
+        type: string
+        default: 2.4
+
+      brooklyn.config:
+        ambari.data.cluster.nodes: 3
+        ambari.version: 2.2.2.0
+        ambari.stack.version: 2.4
+
+      brooklyn.children:
+      - type: io.brooklyn.ambari.AmbariCluster
+        brooklyn.enrichers:
+         - type: org.apache.brooklyn.enricher.stock.Propagator
+           brooklyn.config:
+             producer: $brooklyn:entity("ambari-server")
+             propagating:
+             - $brooklyn:sensor("ambari.server.clusterState")
+             - $brooklyn:sensor("ambari.server.http.password")
+        brooklyn.config:
+          version: $brooklyn:config("ambari.version")
+          stackVersion: $brooklyn:config("ambari.stack.version")
+          securityGroup: $brooklyn:config("ambari.security.group")
+          ambaricluster.serverspec:
+            $brooklyn:entitySpec:
+              type: io.brooklyn.ambari.server.AmbariServer
+              id: ambari-server
+              name: Server
+          ambaricluster.agentspec:
+            $brooklyn:entitySpec:
+              type: io.brooklyn.ambari.agent.AmbariAgent
+              id: ambari-node
+              brooklyn.enrichers:
+                - type: org.apache.brooklyn.policy.ha.ServiceFailureDetector
+                  brooklyn.config:
+                    # wait 15s after service fails before propagating failure
+                    serviceFailedStabilizationDelay: 15s
+        brooklyn.children:
+        - type: io.brooklyn.ambari.hostgroup.AmbariHostGroup
+          id: name-node-cluster
+          name: NameNode
+          brooklyn.config:
+            provisioning.properties:
+              inboundPorts: [22, 8080]
+          brooklyn.config:
+            components:
+            - ZOOKEEPER_CLIENT
+            - NAMENODE
+            - HBASE_MASTER
+            - HDFS_CLIENT
+            - YARN_CLIENT
+            - MAPREDUCE2_CLIENT
+            - ZOOKEEPER_SERVER
+            - HBASE_CLIENT
+            - APP_TIMELINE_SERVER
+            - RESOURCEMANAGER
+        - type: io.brooklyn.ambari.hostgroup.AmbariHostGroup
+          name: SecondaryNameNode
+          id: secondary-name-node-cluster
+          brooklyn.config:
+            components:
+            - SECONDARY_NAMENODE
+            - HBASE_REGIONSERVER
+            - ZOOKEEPER_SERVER
+            - NODEMANAGER
+            - DATANODE
+            - JOURNALNODE
+        - type: io.brooklyn.ambari.hostgroup.AmbariHostGroup
+          name: DataNode
+          id: data-node-cluster
+          brooklyn.config:
+            cluster.initial.size: $brooklyn:config("ambari.data.cluster.nodes")
+            components:
+            - HBASE_REGIONSERVER
+            - ZOOKEEPER_SERVER
+            - NODEMANAGER
+            - DATANODE
+            - JOURNALNODE
+          brooklyn.policies:
+          - type: org.apache.brooklyn.policy.ha.ServiceReplacer
+            brooklyn.config:
+              failureSensorToMonitor: $brooklyn:sensor("ha.entityFailed")
